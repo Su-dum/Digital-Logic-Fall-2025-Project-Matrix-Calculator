@@ -4,6 +4,18 @@
 
 这是对"基于FPGA的交互式矩阵计算器"项目的完整重构，重点是优化BRAM（块RAM）的使用。通过精心设计的内存管理架构，确保在Xilinx EGO1开发板（Artix-7 FPGA）上的综合时使用BRAM而不是LUT资源。
 
+## TODO 
+
+- 将LUT储存变成用BRAM存储 √
+- 实现主模式、子模式转换 √
+- 按键消抖 √
+- 实现UART通信 √
+- 实现输入矩阵并存储 √
+- 实现访问矩阵（通过BRAM） （可能完成了？未上板）
+- 实现随机生成模式
+- 实现计算模式和若干计算类型
+- 完善设置模式和展示模式（这个不要求，但是方便阅读，可以显示目前存储的所有矩阵）
+
 ## 文件清单
 
 ### 核心模块
@@ -75,49 +87,7 @@
 ### 4. 分离的内存策略
 - 矩阵数据：BRAM（大容量顺序访问）
 - 矩阵元数据：分布式RAM（小容量随机访问）
-
-## 快速开始
-
-### 1. 验证语法（可选但推荐）
-```powershell
-cd Restructure
-.\syntax_check.ps1
-```
-预期结果：`Status: PASS ✓ - Project ready for synthesis`
-
-### 2. 在Vivado中打开项目
-
-**方法A：使用TCL脚本**
-```tcl
-vivado -source create_project.tcl
-```
-
-**方法B：手动创建**
-1. 打开Vivado 2017
-2. New Project → 选择Restructure文件夹
-3. 添加所有.v和.vh文件作为设计源
-4. 设置 `matrix_calculator_top_optimized` 为顶层模块
-5. 添加XDC约束文件
-
-### 3. 综合
-```tcl
-# Vivado tcl控制台
-launch_runs synth_1 -jobs 4
-wait_on_run synth_1
-open_run synth_1
-```
-
-### 4. 验证BRAM使用
-在Vivado中检查：
-- Design → Summary
-- 查看 "Block RAM/FIFO" 部分
-- 应显示 ≥1 个BRAM块
-
-### 5. 实现和生成bitstream
-```tcl
-launch_runs impl_1 -to_step write_bitstream -jobs 4
-```
-
+  
 ## 项目规格
 
 | 参数 | 值 |
@@ -266,11 +236,6 @@ report_utilization -file bram_utilization.txt
 3. 级联多个BRAM块扩展容量
 4. 添加DDR3接口支持大型矩阵
 
-## 文档参考
-
-- **RESTRUCTURE_GUIDE.md** - 详细的重构和集成指南
-- **原项目README.md** - 项目功能概述
-- **Xilinx Vivado手册** - 综合约束和最佳实践
 
 ## 许可证
 
