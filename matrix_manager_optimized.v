@@ -141,7 +141,7 @@ always @(posedge clk or negedge rst_n) begin
 end
 
 // ========================================
-// Total Matrix Count (combinational)
+// Total Matrix Count 
 // ========================================
 integer count_i;
 reg [7:0] total_count_comb;
