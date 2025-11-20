@@ -21,7 +21,7 @@ module input_mode #(
     
     // UART receive interface
     input wire [7:0] rx_data,
-    input wire rx_valid,
+    input wire rx_done,
     output reg clear_rx_buffer,
     
     // UART transmit interface
@@ -113,12 +113,12 @@ always @(posedge clk or negedge rst_n) begin
                 alloc_req <= 1'b0;
                 commit_req <= 1'b0;
                 sub_state <= PARSE_M;
+                
             end
             
             PARSE_M: begin
-                if (rx_valid) begin
-                    if (rx_data == 8'h0D || rx_data == 8'h0A) begin
-                        // Line-end: latch M
+                if (rx_done) begin
+                    if (rx_data == 8'h20) begin // 空格键作为分隔符
                         input_m <= parse_accum[3:0];
                         parse_accum <= 8'd0;
                         sub_state <= PARSE_N;
@@ -127,19 +127,27 @@ always @(posedge clk or negedge rst_n) begin
                         // Optimize multiply-by-10 as shift-add: x*10 = (x<<3) + (x<<1)
                         parse_accum <= {parse_accum[4:0], 3'd0} + {6'd0, parse_accum[1:0]} + (rx_data - "0");
                     end
-                    // Ignore non-digit, non-newline characters
+                    // 发送确认信息：回显接收到的数据
+                    if (!tx_busy) begin
+                        tx_data <= rx_data; // 回显接收到的字符
+                        tx_start <= 1'b1;
+                    end
                 end
             end
             
             PARSE_N: begin
-                if (rx_valid) begin
-                    if (rx_data == 8'h0D || rx_data == 8'h0A) begin
-                        // Line-end: latch N
+                if (rx_done) begin
+                    if (rx_data == 8'h20) begin // 空格键作为分隔符
                         input_n <= parse_accum[3:0];
                         parse_accum <= 8'd0;
                         sub_state <= CHECK_DIM;
                     end else if (rx_data >= "0" && rx_data <= "9") begin
                         parse_accum <= {parse_accum[4:0], 3'd0} + {6'd0, parse_accum[1:0]} + (rx_data - "0");
+                    end
+                    // 发送确认信息：回显接收到的数据
+                    if (!tx_busy) begin
+                        tx_data <= rx_data; // 回显接收到的字符
+                        tx_start <= 1'b1;
                     end
                 end
             end
@@ -176,7 +184,7 @@ always @(posedge clk or negedge rst_n) begin
             end
             
             PARSE_DATA: begin
-                if (rx_valid) begin
+                if (rx_done) begin
                     if (rx_data >= "0" && rx_data <= "9") begin
                         // Single-digit immediate value
                         if ((rx_data - "0") > {4'd0, config_max_value}) begin
@@ -196,6 +204,11 @@ always @(posedge clk or negedge rst_n) begin
                         end
                     end
                     // Ignore non-digit characters (spaces, commas, newlines are skipped)
+                    // 发送确认信息：回显接收到的数据
+                    if (!tx_busy) begin
+                        tx_data <= rx_data; // 回显接收到的字符
+                        tx_start <= 1'b1;
+                    end
                 end
             end
             
@@ -211,7 +224,7 @@ always @(posedge clk or negedge rst_n) begin
             DONE: begin
                 commit_req <= 1'b0;
                 if (!tx_busy) begin
-                    tx_data <= "O";  // Success indicator
+                    tx_data <= 8'b01000011;  // Success indicator ('C')
                     tx_start <= 1'b1;
                     sub_state <= IDLE;
                 end
