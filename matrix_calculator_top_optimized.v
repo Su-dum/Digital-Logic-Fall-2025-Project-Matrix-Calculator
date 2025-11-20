@@ -22,36 +22,21 @@ module matrix_calculator_top_optimized (
     // ========================================
     // 1. 按键消抖 (Debouncing) - 核心修复
     // ========================================
-    wire btn_back_db;
-    wire btn_confirm_db;
     // 脉冲检测信号
     (* DONT_TOUCH = "true" *) wire btn_confirm_pulse; 
     (* DONT_TOUCH = "true" *) wire btn_back_pulse;
-    reg btn_confirm_r, btn_back_r;
 
     // 消抖模块：直接传入原始按键信号
     button_debounce db_confirm (
         .clk(clk), .rst_n(rst_n), 
         .btn_in(btn_confirm),  // 原始按键信号（有上拉，按下时为0）
-        .btn_out(btn_confirm_db),
         .btn_pulse(btn_confirm_pulse) // 新增脉冲输出
     );
     button_debounce db_back (
         .clk(clk), .rst_n(rst_n), 
         .btn_in(btn_back),     // 原始按键信号
-        .btn_out(btn_back_db),
         .btn_pulse(btn_back_pulse) // 新增脉冲输出
     );
-
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            btn_confirm_r <= 1'b1;  
-            btn_back_r    <= 1'b1;
-        end else begin
-            btn_confirm_r <= btn_confirm_db;
-            btn_back_r    <= btn_back_db;
-        end
-    end
 
     // ========================================
     // Main State Machine
@@ -213,13 +198,12 @@ assign query_slot_mux = display_mode_active ? query_slot_display : query_slot_co
                         3'd3: main_state_next = `MODE_DISPLAY;
                         3'd4: main_state_next = `MODE_COMPUTE;
                         3'd5: main_state_next = `MODE_SETTING;
-                        // 建议：这里可以不做任何事，或者让错误LED闪烁?1?7??下提示用户没拨开?1?7??
                         default: main_state_next = `MAIN_MENU; 
                     endcase
                 end
             end
             
-            default: begin // 在任何子模式?1?7??
+            default: begin 
                 if (btn_back_pulse) begin
                     main_state_next = `MAIN_MENU;
                 end

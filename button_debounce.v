@@ -4,15 +4,10 @@ module button_debounce(
     input wire clk,
     input wire rst_n,
     input wire btn_in,
-    output reg btn_out,
     output wire btn_pulse
 );
-    // 15ms @ 25MHz = 375,000 cycles (debounce time matched to actual clock)
-    parameter CNT_MAX = 21'd300_000; 
-    
-    reg [20:0] cnt;
+
     reg btn_sync_0, btn_sync_1; 
-    reg btn_r;
 
     // Stage 1: Signal synchronization (correct as-is)
     always @(posedge clk or negedge rst_n) begin
@@ -25,27 +20,5 @@ module button_debounce(
         end
     end
     
-    // Stage 2: Debounce counting (critical fix)
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            cnt <= 21'd0;
-            btn_out <= 1'b1; // FIX: Reset to 1 (button has pull-up, normally HIGH)
-            btn_r <= 1'b1; // Initialize btn_r to match btn_out
-        end else begin
-            // If synchronized input signal equals current output signal
-            if (btn_sync_1 == btn_out) begin
-                cnt <= 21'd0; // Reset counter, wait for next change
-            end else begin
-                // State mismatch, start counting
-                cnt <= cnt + 1'b1;
-                if (cnt == CNT_MAX) begin
-                    btn_out <= btn_sync_1; // Update output only after CNT_MAX cycles
-                end
-            end
-            btn_r <= btn_out; // Update btn_r to track btn_out
-        end
-    end
-
-    // Generate pulse on falling edge
-    assign btn_pulse = ~btn_out & btn_r;
+    assign btn_pulse = ~btn_sync_0 & btn_sync_1;
 endmodule
