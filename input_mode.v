@@ -279,7 +279,7 @@ always @(posedge clk or negedge rst_n) begin
             
             DISPLAY_MATRIX: begin
                 commit_req <= 1'b0;
-                
+                mem_rd_en <= 1'b1;
                 case (display_step)
                     3'd0: begin // Send newline at start of row
                         if (!tx_busy && !tx_start) begin
@@ -350,6 +350,7 @@ always @(posedge clk or negedge rst_n) begin
                         if (!tx_busy && !tx_start) begin
                             tx_data <= 8'h0A;
                             tx_start <= 1'b1;
+                            mem_rd_en <= 1'b0;
                             sub_state <= DONE;
                         end
                     end
