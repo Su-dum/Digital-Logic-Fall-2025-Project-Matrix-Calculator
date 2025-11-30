@@ -1,12 +1,9 @@
 # Digital Logic 2025 Fall Project Architecture Report 
 
-**Author**: 
-
-        Yanqiao Chen, CSE, SUStech, Shenzhen
-
-        Yan Jiang, CSE, SUSTech, Shenzhen
-
-        Dongsheng Hou, CSE, SUSTech, Shenzhen
+**Authors:**
+- Yanqiao Chen(12412115)
+- Yan Jiang(12410337)
+- Dongsheng Hou(12410421)
 
 ## The INPUT and OUTPUT
 
@@ -29,7 +26,10 @@ The input port and output port is listed as follows:
 - LED: 4 bits width, LD3 as MSB, LD0 as LSB, used for indicating working, error type and so on.
 - 7-Seg LED selection: 2 bits width, used for selecting 7-Seg LED
 
-## Inner Architecture
+![描述文本](1.png)  
+
+
+## Architecture
 
 The Architecture of this project is purposed as follow: 
 
@@ -90,6 +90,8 @@ The Architecture of this project is purposed as follow:
     └─────────────┘      └──────────────┘
 ```
 
+![描述文本](2.png)  
+
 ### The Top Module
 
 The top module includes
@@ -108,7 +110,7 @@ The top module includes
 
 | Name | Input | Output | Usage|
 |:--------------:|:---:|:---:|:---:|
-|Compute Mode| clk (1 bit), rst_n (1 bit), mode_active (1 bit), config_max_dim [3:0], dip_sw [2:0], btn_confirm (1 bit), rx_data [7:0], rx_done (1 bit), tx_busy (1 bit), total_matrix_count [7:0], query_valid (1 bit), query_m [3:0], query_n [3:0], query_addr [11:0], query_element_count [7:0], mem_rd_data [15:0]| clear_rx_buffer (1 bit), tx_data [7:0], tx_start (1 bit), selected_op_type [3:0], query_slot [3:0], mem_rd_en (1 bit), mem_rd_addr [11:0], error_code [3:0], sub_state [3:0]| Performs matrix computations like addition, subtraction, multiplication|
+|Compute Mode| clk (1 bit), rst_n (1 bit), mode_active (1 bit), config_max_dim [3:0], dip_sw [2:0], btn_confirm (1 bit), rx_data [7:0], rx_done (1 bit), tx_busy (1 bit), total_matrix_count [7:0], query_valid (1 bit), query_m [3:0], query_n [3:0], query_addr [11:0], query_element_count [7:0], mem_rd_data [15:0]| clear_rx_buffer (1 bit), tx_data [7:0], tx_start (1 bit), selected_op_type [3:0], query_slot [3:0], mem_rd_en (1 bit), mem_rd_addr [11:0], error_code [3:0], sub_state [3:0]| Performs matrix computations like addition, multiplication|
 |Generate Mode| clk (1 bit), rst_n (1 bit), mode_active (1 bit), config_max_dim [3:0], config_max_value [3:0], random_value [3:0], rx_data [7:0], rx_done (1 bit), tx_busy (1 bit), alloc_slot [3:0], alloc_addr [11:0], alloc_valid (1 bit)| clear_rx_buffer (1 bit), tx_data [7:0], tx_start (1 bit), alloc_req (1 bit), commit_req (1 bit), commit_slot [3:0], commit_m [3:0], commit_n [3:0], commit_addr [11:0], mem_wr_en (1 bit), mem_wr_addr [11:0], mem_wr_data [15:0], error_code [3:0], sub_state [3:0]| Generates matrices with random or predefined values|
 |Input Mode| clk (1 bit), rst_n (1 bit), mode_active (1 bit), config_max_dim [3:0], config_max_value [3:0], rx_data [7:0], rx_done (1 bit), tx_busy (1 bit), alloc_slot [3:0], alloc_addr [11:0], alloc_valid (1 bit), mem_rd_data [15:0]| clear_rx_buffer (1 bit), tx_data [7:0], tx_start (1 bit), alloc_req (1 bit), alloc_m [3:0], alloc_n [3:0], commit_req (1 bit), commit_slot [3:0], commit_m [3:0], commit_n [3:0], commit_addr [11:0], mem_wr_en (1 bit), mem_wr_addr [11:0], mem_wr_data [15:0], mem_rd_en (1 bit), mem_rd_addr [11:0], error_code [3:0], sub_state [3:0]| Receives matrix data from UART and manages memory allocation|
 |Setting Mode| clk (1 bit), rst_n (1 bit), mode_active (1 bit), rx_data [7:0], rx_done (1 bit), tx_busy (1 bit)| clear_rx_buffer (1 bit), tx_data [7:0], tx_start (1 bit), config_max_dim [3:0], config_max_value [3:0], config_matrices_per_size [3:0], error_code [3:0], sub_state [3:0]| Configures operational settings|
@@ -134,20 +136,16 @@ The top module includes
 |matrix package|NO | NO | Some Macros settings, like clock frequency|
 |LSFR Random number generator|clk, rst_n, max_value[3:0]|random_value[3:0]| For generating psuedorandom number, by using polynomial|
 
-## Previous Progress
+## The FSM
 
-### Done
+Some main states of this project:
 
-- Done developing FSM for Modes
-- Done developing UART module
-- Done developing button debounce
-- Done BRAM developing
-- Done developing input, storage
-- Almost done developing query from BRAM
+- IDLE, MODE_INPUT, MODE_COMPUTE, MODE_GENERATE, MODE_SETTING, MODE_DISPLAY
+- Input Mode: IDLE, PARSE_M, PARSE_N, CHECK_DIM, WAIT_ALLOC, PARSE_DATA, FILL_ZEROS, COMMIT, DISPLAY_MATRIX, DONE, ERROR
+- Display Mode: IDLE, SHOW_COUNT, WAIT_SELECT, READ_DATA, CONVERT_DATA, SEND_DIGITS, DONE
+- Generate Mode: IDLE, WAIT_M, WAIT_N, ALLOC, GEN_DATA, COMMIT, DONE
+- Compute Mode: IDLE, SELECT_OP, SELECT_MATRIX, EXECUTE, SEND_RESULT, DONE
 
-### TODO
-
-- Develop the implementation of function of modes
-- Develop Convolution
-
-© 2024 Yanqiao Chen, Yan Jiang, Dongsheng Hou. This project is licensed under the [MIT License](LICENSE).
+**Top**
+![描述文本](top.png) 
+![描述文本](3.png) 
