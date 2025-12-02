@@ -152,6 +152,12 @@ wire mem_wr_en_input, mem_wr_en_generate;
 wire [`BRAM_ADDR_WIDTH-1:0] mem_wr_addr_input, mem_wr_addr_generate;
 wire [`ELEMENT_WIDTH-1:0] mem_wr_data_input, mem_wr_data_generate;
 
+// ========================================
+// BRAM Memory Read Multiplexing (Port B)
+// ========================================
+wire mem_rd_en_input;
+wire [`BRAM_ADDR_WIDTH-1:0] mem_rd_addr_input;
+
 assign mem_a_en = mem_wr_en_input | mem_wr_en_generate | mem_rd_en_display | mem_rd_en_compute;
 assign mem_a_we = mem_wr_en_input | mem_wr_en_generate;
 assign mem_a_addr = mem_wr_en_input ? mem_wr_addr_input :
@@ -159,6 +165,10 @@ assign mem_a_addr = mem_wr_en_input ? mem_wr_addr_input :
                     mem_rd_en_display ? mem_rd_addr_display :
                     mem_rd_addr_compute;
 assign mem_a_din = mem_wr_en_input ? mem_wr_data_input : mem_wr_data_generate;
+
+// Port B is currently used only by Input Mode for verification
+assign mem_b_en = mem_rd_en_input;
+assign mem_b_addr = mem_rd_addr_input;
 
 // ========================================
 // BRAM Memory Read Multiplexing
@@ -382,9 +392,9 @@ input_mode input_mode_inst (
     .mem_wr_en(mem_wr_en_input),
     .mem_wr_addr(mem_wr_addr_input),
     .mem_wr_data(mem_wr_data_input),
-    .mem_rd_en(input_mode_active ? mem_b_en : 1'b0), // Enable only in input mode
-    .mem_rd_addr(input_mode_active ? mem_b_addr : {`BRAM_ADDR_WIDTH{1'b0}}), 
-    .mem_rd_data(input_mode_active ? mem_b_dout : {`ELEMENT_WIDTH{1'b0}}),
+    .mem_rd_en(mem_rd_en_input),
+    .mem_rd_addr(mem_rd_addr_input), 
+    .mem_rd_data(mem_b_dout),
     .error_code(error_code_input),
     .sub_state(sub_state_input)
 );

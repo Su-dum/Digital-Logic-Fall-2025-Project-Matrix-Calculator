@@ -57,14 +57,4 @@ always @(posedge clk) begin
     end
 end
 
-// ========================================
-// Optional: Initialization (if needed)
-// ========================================
-integer i;
-initial begin
-    for (i = 0; i < DEPTH; i = i + 1) begin
-        bram_mem[i] = {DATA_WIDTH{1'b0}};
-    end
-end
-
 endmodule
