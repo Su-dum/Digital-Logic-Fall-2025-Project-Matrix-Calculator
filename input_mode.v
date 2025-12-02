@@ -81,7 +81,7 @@ reg [ADDR_WIDTH-1:0] input_alloc_addr;
 // Display formatting registers
 reg [3:0] display_row;        // Current row being displayed
 reg [3:0] display_col;        // Current column being displayed
-reg [2:0] display_step;       // Sub-state for formatting (0=newline, 1=space, 2=digit)
+reg [3:0] display_step;       // Sub-state for formatting (0=newline, 1=space, 2=digit)
 reg [ELEMENT_WIDTH-1:0] display_value;  // Current element value to display
 
 always @(posedge clk or negedge rst_n) begin
@@ -96,7 +96,7 @@ always @(posedge clk or negedge rst_n) begin
         input_alloc_addr <= {ADDR_WIDTH{1'b0}};
         display_row <= 4'd0;
         display_col <= 4'd0;
-        display_step <= 3'd0;
+        display_step <= 4'd0;
         display_value <= {ELEMENT_WIDTH{1'b0}};
         mem_wr_en <= 1'b0;
         mem_wr_addr <= {ADDR_WIDTH{1'b0}};
@@ -147,10 +147,10 @@ always @(posedge clk or negedge rst_n) begin
                         parse_accum <= {parse_accum[4:0], 3'd0} + {6'd0, parse_accum[1:0]} + (rx_data - "0");
                     end
                     // 发送确认信息：回显接收到的数据
-                    if (!tx_busy) begin
-                        tx_data <= "M"; // 回显接收到的字符
-                        tx_start <= 1'b1;
-                    end
+                    // if (!tx_busy) begin
+                    //    tx_data <= "M"; // 回显接收到的字符
+                    //    tx_start <= 1'b1;
+                    // end
                 end
             end
             
@@ -164,19 +164,19 @@ always @(posedge clk or negedge rst_n) begin
                         parse_accum <= {parse_accum[4:0], 3'd0} + {6'd0, parse_accum[1:0]} + (rx_data - "0");
                     end
                     // 发送确认信息：回显接收到的数据
-                    if (!tx_busy) begin
-                        tx_data <= "N"; // 回显接收到的字符
-                        tx_start <= 1'b1;
-                    end
+                    // if (!tx_busy) begin
+                    //    tx_data <= "N"; // 回显接收到的字符
+                    //    tx_start <= 1'b1;
+                    // end
                 end
             end
             
             CHECK_DIM: begin
                 // Debug echo first
-                if (!tx_busy && !tx_start) begin
-                    tx_data <= "L"; // 回显：进入CHECK_DIM状态
-                    tx_start <= 1'b1;
-                end
+                // if (!tx_busy && !tx_start) begin
+                //    tx_data <= "L"; // 回显：进入CHECK_DIM状态
+                //    tx_start <= 1'b1;
+                // end
                 
                 // Then check dimensions
                 if (input_m == 4'd0 || input_m > config_max_dim ||
@@ -197,10 +197,10 @@ always @(posedge clk or negedge rst_n) begin
                 alloc_req <= 1'b1;
                 
                 // Debug echo
-                if (!tx_busy && !tx_start) begin
-                    tx_data <= "W"; // 回显：进入WAIT_ALLOC状态
-                    tx_start <= 1'b1;
-                end
+                // if (!tx_busy && !tx_start) begin
+                //    tx_data <= "W"; // 回显：进入WAIT_ALLOC状态
+                //    tx_start <= 1'b1;
+                // end
                 
                 if (alloc_valid) begin
                     input_alloc_addr <= alloc_addr;
@@ -245,10 +245,10 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     // Space and other non-digit characters are ignored (used as separators)
                     // 发送确认信息：回显接收到的数据
-                    if (!tx_busy) begin
-                        tx_data <= rx_data; // 回显接收到的字符
-                        tx_start <= 1'b1;
-                    end
+                    // if (!tx_busy) begin
+                    //    tx_data <= rx_data; // 回显接收到的字符
+                    //    tx_start <= 1'b1;
+                    // end
                 end
             end
             
@@ -273,7 +273,7 @@ always @(posedge clk or negedge rst_n) begin
                 commit_addr <= input_alloc_addr;
                 display_row <= 4'd0;
                 display_col <= 4'd0;
-                display_step <= 3'd0;
+                display_step <= 4'd0;
                 sub_state <= DISPLAY_MATRIX;
             end
             
@@ -281,72 +281,76 @@ always @(posedge clk or negedge rst_n) begin
                 commit_req <= 1'b0;
                 mem_rd_en <= 1'b1;
                 case (display_step)
-                    3'd0: begin // Send newline at start of row
+                    4'd0: begin // Send newline at start of row
                         if (!tx_busy && !tx_start) begin
                             tx_data <= 8'h0D; // Carriage return
                             tx_start <= 1'b1;
-                            display_step <= 3'd1;
+                            display_step <= 4'd1;
                         end
                     end
                     
-                    3'd1: begin // Send line feed
+                    4'd1: begin // Send line feed
                         if (!tx_busy && !tx_start) begin
                             tx_data <= 8'h0A; // Line feed
                             tx_start <= 1'b1;
-                            display_step <= 3'd2;
+                            display_step <= 4'd2;
                         end
                     end
                     
-                    3'd2: begin // Request memory read for current element
+                    4'd2: begin // Request memory read for current element
                         mem_rd_addr <= input_alloc_addr + ({4'd0, display_row} * {4'd0, input_n}) + {8'd0, display_col};
-                        display_step <= 3'd3;
+                        display_step <= 4'd3;
                     end
                     
-                    3'd3: begin // Wait one cycle for memory read
+                    4'd3: begin // Wait one cycle for BRAM read latency
+                        display_step <= 4'd4;
+                    end
+                    
+                    4'd4: begin // Latch data from BRAM
                         display_value <= mem_rd_data;
-                        display_step <= 3'd4;
+                        display_step <= 4'd5;
                     end
                     
-                    3'd4: begin // Send the digit
+                    4'd5: begin // Send the digit
                         if (!tx_busy && !tx_start) begin
                             tx_data <= display_value[3:0] + "0"; // Convert to ASCII
                             tx_start <= 1'b1;
-                            display_step <= 3'd5;
+                            display_step <= 4'd6;
                         end
                     end
                     
-                    3'd5: begin // Send space or move to next row
+                    4'd6: begin // Send space or move to next row
                         if (!tx_busy && !tx_start) begin
                             if (display_col == input_n - 1) begin
                                 // End of row
                                 display_col <= 4'd0;
                                 if (display_row == input_m - 1) begin
                                     // All done
-                                    display_step <= 3'd6;
+                                    display_step <= 4'd7;
                                 end else begin
                                     // Next row
                                     display_row <= display_row + 1'b1;
-                                    display_step <= 3'd0;
+                                    display_step <= 4'd0;
                                 end
                             end else begin
                                 // Send space and continue in same row
                                 tx_data <= 8'h20; // Space
                                 tx_start <= 1'b1;
                                 display_col <= display_col + 1'b1;
-                                display_step <= 3'd2;
+                                display_step <= 4'd2;
                             end
                         end
                     end
                     
-                    3'd6: begin // Final newline
+                    4'd7: begin // Final newline
                         if (!tx_busy && !tx_start) begin
                             tx_data <= 8'h0D;
                             tx_start <= 1'b1;
-                            display_step <= 3'd7;
+                            display_step <= 4'd8;
                         end
                     end
                     
-                    3'd7: begin // Final line feed, then done
+                    4'd8: begin // Final line feed, then done
                         if (!tx_busy && !tx_start) begin
                             tx_data <= 8'h0A;
                             tx_start <= 1'b1;
@@ -355,17 +359,18 @@ always @(posedge clk or negedge rst_n) begin
                         end
                     end
                     
-                    default: display_step <= 3'd0;
+                    default: display_step <= 4'd0;
                 endcase
             end
             
             DONE: begin
                 commit_req <= 1'b0;
-                if (!tx_busy) begin
-                    tx_data <= "D";  // Success indicator ('D')
-                    tx_start <= 1'b1;
-                    sub_state <= IDLE;
-                end
+                // if (!tx_busy) begin
+                //    tx_data <= "D";  // Success indicator ('D')
+                //    tx_start <= 1'b1;
+                //    sub_state <= IDLE;
+                // end
+                sub_state <= IDLE;
             end
             
             ERROR: begin
