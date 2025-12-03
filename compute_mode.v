@@ -385,13 +385,27 @@ always @(posedge clk or negedge rst_n) begin
                     
                     5'd11: begin // Wait read
                         sel_step <= 5'd12;
+                        print_step <= 0;
                     end
                     
                     5'd12: begin // Send Element
                         if (!tx_busy) begin
-                            tx_data <= (mem_rd_data[3:0] < 10) ? (mem_rd_data[3:0] + "0") : (mem_rd_data[3:0] - 10 + "A");
-                            tx_start <= 1;
-                            sel_step <= 5'd22;
+                            if (mem_rd_data >= 100) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 5'd22; end
+                                endcase
+                            end else if (mem_rd_data >= 10) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 5'd22; end
+                                endcase
+                            end else begin
+                                tx_data <= mem_rd_data + "0";
+                                tx_start <= 1;
+                                sel_step <= 5'd22;
+                            end
                         end
                     end
 
