@@ -28,11 +28,11 @@ module display_ctrl (
     // 特殊字符定义 (依据 PDF)
     // T (Transpose): E,F,A,B -> 像 't' (0000111) 容易混淆，通常用 F,E,D,G (0111000) -> 't' 或 E,F,A (1110000) -> '7'?
     // 建议：
-    localparam CHAR_T = 7'b0000111; // 显示 't' (或者 7'b1111000 "t" 带横杠)
-    localparam CHAR_A = 7'b1110111; // 'A'
-    localparam CHAR_B = 7'b1111111; // 'B' (显示为 8，通常用 b: 0011111) -> 7'b0011111
-    localparam CHAR_C = 7'b0111001; // 'C'
-    localparam CHAR_J = 7'b0011110; // 'J'
+    localparam CHAR_T = 7'b0111100; // Display 'T'
+    localparam CHAR_A = 7'b0111011; // Display 'A'
+    localparam CHAR_S = 7'b1101101; // Display 'S'
+    localparam CHAR_M = 7'b0111001; // Display 'M'
+    localparam CHAR_C = 7'b1001110; // Display 'C'
 
     reg [6:0] disp_data_mode;
     reg [6:0] disp_data_op;
@@ -57,9 +57,9 @@ module display_ctrl (
             case (op_type)
                 3'd1: disp_data_op = CHAR_T; // Transpose
                 3'd2: disp_data_op = CHAR_A; // Add
-                3'd3: disp_data_op = 7'b0011111; // b (Scalar)
-                3'd4: disp_data_op = CHAR_C; // Mult
-                3'd5: disp_data_op = CHAR_J; // Conv 
+                3'd3: disp_data_op = CHAR_S; // b (Scalar)
+                3'd4: disp_data_op = CHAR_M; // Mult
+                3'd5: disp_data_op = CHAR_C; // Conv 
                 default: disp_data_op = S_OFF;
             endcase
         end else if (error_code != 0) begin

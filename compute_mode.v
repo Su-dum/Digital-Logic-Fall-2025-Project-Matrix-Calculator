@@ -89,6 +89,7 @@ reg [4:0] scan_slot;
 reg [3:0] iter_m, iter_n;
 reg [7:0] current_count;
 reg [3:0] target_m, target_n;
+reg [3:0] op1_m, op1_n; // New registers to store Op1 dimensions
 reg [3:0] op1_slot, op2_slot;
 reg [7:0] scalar_val;
 reg [7:0] match_idx;
@@ -388,7 +389,7 @@ always @(posedge clk or negedge rst_n) begin
                     
                     5'd12: begin // Send Element
                         if (!tx_busy) begin
-                            tx_data <= mem_rd_data[3:0] + "0";
+                            tx_data <= (mem_rd_data[3:0] < 10) ? (mem_rd_data[3:0] + "0") : (mem_rd_data[3:0] - 10 + "A");
                             tx_start <= 1;
                             sel_step <= 5'd22;
                         end
@@ -450,9 +451,15 @@ always @(posedge clk or negedge rst_n) begin
                         if (query_valid && query_m == target_m && query_n == target_n) begin
                             if (match_idx == user_sel_idx) begin
                                 op1_slot <= scan_slot[3:0];
+                                op1_m <= target_m; // Save Op1 dimensions
+                                op1_n <= target_n;
                                 if (selected_op_type == OP_TRANSPOSE || selected_op_type == OP_SCALAR_MUL) begin
                                     if (selected_op_type == OP_SCALAR_MUL) sel_step <= 6'd43; // Wait RX low then 19
                                     else sel_step <= 6'd25; // Print Op1
+                                end else if (selected_op_type == OP_MUL) begin
+                                    // For Matrix Mul, we need to select 2nd matrix with potentially different dims
+                                    // Reset stats and go to stats phase for 2nd operand
+                                    sel_step <= 6'd44; 
                                 end else begin
                                     sel_step <= 6'd42; // Wait RX low then 16
                                 end
@@ -474,6 +481,219 @@ always @(posedge clk or negedge rst_n) begin
                             end else begin
                                 scan_slot <= scan_slot + 1;
                                 sel_step <= 6'd14;
+                            end
+                        end
+                    end
+
+                    // ==========================================
+                    // NEW: Stats & Selection for 2nd Operand (Mul)
+                    // ==========================================
+                    6'd44: begin // Init Stats for Op2
+                        iter_m <= 1;
+                        iter_n <= 1;
+                        scan_slot <= 0;
+                        current_count <= 0;
+                        sel_step <= 6'd45;
+                    end
+                    
+                    6'd45: begin // Set query
+                        query_slot <= scan_slot[3:0];
+                        sel_step <= 6'd46; 
+                    end
+                    
+                    6'd46: begin // Check result
+                        if (query_valid && query_m == iter_m && query_n == iter_n)
+                            current_count <= current_count + 1;
+                            
+                        if (scan_slot == 15) begin 
+                            if (current_count > 0) sel_step <= 6'd47; 
+                            else sel_step <= 6'd48; 
+                        end else begin
+                            scan_slot <= scan_slot + 1;
+                            sel_step <= 6'd45;
+                        end
+                    end
+                    
+                    6'd47: begin // Print "M N : C"
+                        if (!tx_busy) begin
+                            case (print_step)
+                                0: begin tx_data <= iter_m + "0"; tx_start <= 1; print_step <= 1; end
+                                1: begin tx_data <= " "; tx_start <= 1; print_step <= 2; end
+                                2: begin tx_data <= iter_n + "0"; tx_start <= 1; print_step <= 3; end
+                                3: begin tx_data <= " "; tx_start <= 1; print_step <= 4; end
+                                4: begin tx_data <= ":"; tx_start <= 1; print_step <= 5; end
+                                5: begin tx_data <= " "; tx_start <= 1; print_step <= 6; end
+                                6: begin tx_data <= current_count + "0"; tx_start <= 1; print_step <= 7; end
+                                7: begin tx_data <= 8'h0D; tx_start <= 1; print_step <= 8; end 
+                                8: begin tx_data <= 8'h0A; tx_start <= 1; print_step <= 0; sel_step <= 6'd48; end 
+                            endcase
+                        end
+                    end
+                    
+                    6'd48: begin // Next dim
+                        scan_slot <= 0;
+                        current_count <= 0;
+                        if (iter_n < config_max_dim) begin
+                            iter_n <= iter_n + 1;
+                            sel_step <= 6'd45;
+                        end else if (iter_m < config_max_dim) begin
+                            iter_m <= iter_m + 1;
+                            iter_n <= 1;
+                            sel_step <= 6'd45;
+                        end else begin
+                            sel_step <= 6'd49; // Wait for Op2 Dims
+                        end
+                    end
+
+                    6'd49: begin // Wait Op2 M
+                        if (rx_done) begin
+                            // For Mul, Op2 M must match Op1 N (target_n)
+                            // But user might input it anyway. We can check or overwrite.
+                            // Let's overwrite target_m/n for Op2 selection context
+                            // Store Op1 dims if needed? Op1 slot is stored.
+                            // target_m <= rx_data - "0"; // User input M
+                            // Actually for Mul: Op1 is (M x N), Op2 must be (N x P)
+                            // So Op2 M MUST be equal to Op1 N.
+                            // We can skip asking for M, or ask and verify.
+                            // Let's ask for P (Op2 N).
+                            // But to be consistent with UI, maybe ask both?
+                            // Let's assume user inputs M then N.
+                            if ((rx_data - "0") == target_n) begin
+                                // Valid M for Op2
+                                sel_step <= 6'd50;
+                            end else begin
+                                // Invalid M for Mul, maybe error or retry?
+                                // For now, just retry
+                                sel_step <= 6'd49;
+                            end
+                            clear_rx_buffer <= 1;
+                        end
+                    end
+                    
+                    6'd50: begin // Wait Op2 N (P)
+                        if (!rx_done) begin // Wait for rx_done to clear from previous step
+                             sel_step <= 6'd51;
+                        end
+                    end
+
+                    6'd51: begin
+                        if (rx_done) begin
+                            target_m <= target_n; // Op2 M = Op1 N
+                            target_n <= rx_data - "0"; // Op2 N = P
+                            sel_step <= 6'd52;
+                            scan_slot <= 0;
+                            match_idx <= 1;
+                        end
+                    end
+
+                    6'd52: begin // List Matrices for Op2
+                        query_slot <= scan_slot[3:0];
+                        sel_step <= 6'd53;
+                    end
+                    
+                    6'd53: begin 
+                        if (query_valid && query_m == target_m && query_n == target_n) begin
+                            print_addr <= query_addr;
+                            print_r <= 0;
+                            print_c <= 0;
+                            sel_step <= 6'd54;
+                        end else begin
+                            if (scan_slot == 15) sel_step <= 6'd42; // Go to Wait Sel 2 (reusing state 16 via 42)
+                            else begin
+                                scan_slot <= scan_slot + 1;
+                                sel_step <= 6'd52;
+                            end
+                        end
+                    end
+                    
+                    6'd54: begin // Print Index
+                        if (!tx_busy) begin
+                            tx_data <= match_idx + "0"; 
+                            tx_start <= 1;
+                            sel_step <= 6'd55; 
+                        end
+                    end
+
+                    6'd55: begin // Send Newline after Index
+                        if (!tx_busy) begin
+                            tx_data <= 8'h0D; // CR
+                            tx_start <= 1;
+                            sel_step <= 6'd56;
+                        end
+                    end
+
+                    6'd56: begin // Send LF
+                        if (!tx_busy) begin
+                            tx_data <= 8'h0A; // LF
+                            tx_start <= 1;
+                            sel_step <= 6'd57;
+                        end
+                    end
+                    
+                    6'd57: begin // Print Matrix Content (Read BRAM)
+                        internal_rd_en <= 1;
+                        internal_rd_addr <= print_addr + (print_r * target_n) + print_c;
+                        sel_step <= 6'd58;
+                    end
+                    
+                    6'd58: begin // Wait read
+                        sel_step <= 6'd59;
+                        print_step <= 0;
+                    end
+                    
+                    6'd59: begin // Send Element
+                        if (!tx_busy) begin
+                            if (mem_rd_data >= 100) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd60; end
+                                endcase
+                            end else if (mem_rd_data >= 10) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd60; end
+                                endcase
+                            end else begin
+                                tx_data <= mem_rd_data + "0";
+                                tx_start <= 1;
+                                sel_step <= 6'd60;
+                            end
+                        end
+                    end
+
+                    6'd60: begin // Check Row End
+                        if (print_c == target_n - 1) begin
+                             if (!tx_busy) begin
+                                 tx_data <= 8'h0D; // CR
+                                 tx_start <= 1;
+                                 sel_step <= 6'd61;
+                             end
+                        end else begin
+                             if (!tx_busy) begin
+                                 tx_data <= " "; // Space between elements
+                                 tx_start <= 1;
+                                 print_c <= print_c + 1;
+                                 sel_step <= 6'd57;
+                             end
+                        end
+                    end
+
+                    6'd61: begin // Send LF
+                        if (!tx_busy) begin
+                            tx_data <= 8'h0A; // LF
+                            tx_start <= 1;
+                            print_c <= 0;
+                            if (print_r == target_m - 1) begin
+                                match_idx <= match_idx + 1;
+                                if (scan_slot == 15) sel_step <= 6'd42; // Go to Wait Sel 2
+                                else begin
+                                    scan_slot <= scan_slot + 1;
+                                    sel_step <= 6'd52;
+                                end
+                            end else begin
+                                print_r <= print_r + 1;
+                                sel_step <= 6'd57; 
                             end
                         end
                     end
@@ -551,24 +771,38 @@ always @(posedge clk or negedge rst_n) begin
                     
                     6'd27: begin // Read BRAM
                         internal_rd_en <= 1;
-                        internal_rd_addr <= print_addr + (print_r * target_n) + print_c;
+                        internal_rd_addr <= print_addr + (print_r * op1_n) + print_c;
                         sel_step <= 6'd28;
                     end
                     
                     6'd28: begin // Wait read
                         sel_step <= 6'd29;
+                        print_step <= 0;
                     end
                     
                     6'd29: begin // Send Element
                         if (!tx_busy) begin
-                            tx_data <= mem_rd_data[3:0] + "0";
-                            tx_start <= 1;
-                            sel_step <= 6'd30;
+                            if (mem_rd_data >= 100) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd30; end
+                                endcase
+                            end else if (mem_rd_data >= 10) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd30; end
+                                endcase
+                            end else begin
+                                tx_data <= mem_rd_data + "0";
+                                tx_start <= 1;
+                                sel_step <= 6'd30;
+                            end
                         end
                     end
 
                     6'd30: begin // Check Row End
-                        if (print_c == target_n - 1) begin
+                        if (print_c == op1_n - 1) begin
                              if (!tx_busy) begin
                                  tx_data <= 8'h0D; // CR
                                  tx_start <= 1;
@@ -589,7 +823,7 @@ always @(posedge clk or negedge rst_n) begin
                             tx_data <= 8'h0A; // LF
                             tx_start <= 1;
                             print_c <= 0;
-                            if (print_r == target_m - 1) begin
+                            if (print_r == op1_m - 1) begin
                                 // Op1 Done. Next?
                                 if (selected_op_type == OP_TRANSPOSE) sel_step <= 6'd20;
                                 else if (selected_op_type == OP_SCALAR_MUL) sel_step <= 6'd39;
@@ -622,13 +856,27 @@ always @(posedge clk or negedge rst_n) begin
                     
                     6'd35: begin // Wait read
                         sel_step <= 6'd36;
+                        print_step <= 0;
                     end
                     
                     6'd36: begin // Send Element
                         if (!tx_busy) begin
-                            tx_data <= mem_rd_data[3:0] + "0";
-                            tx_start <= 1;
-                            sel_step <= 6'd37;
+                            if (mem_rd_data >= 100) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd37; end
+                                endcase
+                            end else if (mem_rd_data >= 10) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd37; end
+                                endcase
+                            end else begin
+                                tx_data <= mem_rd_data + "0";
+                                tx_start <= 1;
+                                sel_step <= 6'd37;
+                            end
                         end
                     end
 
@@ -818,12 +1066,26 @@ always @(posedge clk or negedge rst_n) begin
                     3: begin // Wait for Read
                         internal_rd_en <= 0;
                         res_send_idx <= 4;
+                        print_step <= 0;
                     end
                     4: begin // Send Data
                         if (!tx_busy) begin
-                            tx_data <= mem_rd_data[3:0] + "0"; 
-                            tx_start <= 1;
-                            res_send_idx <= 6;
+                            if (mem_rd_data >= 100) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; res_send_idx <= 6; end
+                                endcase
+                            end else if (mem_rd_data >= 10) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; res_send_idx <= 6; end
+                                endcase
+                            end else begin
+                                tx_data <= mem_rd_data + "0";
+                                tx_start <= 1;
+                                res_send_idx <= 6;
+                            end
                         end
                     end
                     6: begin // Check Row End
