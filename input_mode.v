@@ -54,7 +54,10 @@ module input_mode #(
     
     // Error and state output
     output reg [3:0] error_code,
-    output reg [3:0] sub_state
+    output reg [3:0] sub_state,
+    
+    // Error recovery signal
+    input wire timeout_reset
 );
 
 // State definitions
@@ -67,8 +70,7 @@ localparam IDLE = 4'd0,
            FILL_ZEROS = 4'd6,
            COMMIT = 4'd7,
            DISPLAY_MATRIX = 4'd8,
-           DONE = 4'd9,
-           ERROR = 4'd10;
+           DONE = 4'd9;
 
 // Streaming parse registers
 reg [7:0] parse_accum;        // Accumulator for multi-digit number (e.g., "12" -> 12)
@@ -138,39 +140,41 @@ always @(posedge clk or negedge rst_n) begin
             end
             
             PARSE_M: begin
-                if (rx_done) begin
+                if (timeout_reset) begin
+                    sub_state <= IDLE;
+                end else if (rx_done) begin
                     if (rx_data == 8'h20) begin // 空格键作为分隔符
                         input_m <= parse_accum[3:0];
                         parse_accum <= 8'd0;
                         sub_state <= PARSE_N;
+                        error_code <= `ERR_NONE;
                     end else if (rx_data >= "0" && rx_data <= "9") begin
                         // Streaming accumulate: M = M*10 + digit
-                        // Optimize multiply-by-10 as shift-add: x*10 = (x<<3) + (x<<1)
-                        
-                        parse_accum <= {parse_accum[4:0], 3'd0} + {6'd0, parse_accum[1:0]} + (rx_data - "0");
+                        parse_accum <= parse_accum * 8'd10 + (rx_data - "0");
+                        error_code <= `ERR_NONE;
+                    end else begin
+                        error_code <= `ERR_DIM_RANGE;
+                        if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end // Echo '!'
                     end
-                    // 发送确认信息：回显接收到的数据
-                    // if (!tx_busy) begin
-                    //    tx_data <= "M"; // 回显接收到的字符
-                    //    tx_start <= 1'b1;
-                    // end
                 end
             end
             
             PARSE_N: begin
-                if (rx_done) begin
+                if (timeout_reset) begin
+                    sub_state <= IDLE;
+                end else if (rx_done) begin
                     if (rx_data == 8'h20) begin // 空格键作为分隔符
                         input_n <= parse_accum[3:0];
                         parse_accum <= 8'd0;
                         sub_state <= CHECK_DIM;
+                        error_code <= `ERR_NONE;
                     end else if (rx_data >= "0" && rx_data <= "9") begin
-                        parse_accum <= {parse_accum[4:0], 3'd0} + {6'd0, parse_accum[1:0]} + (rx_data - "0");
+                        parse_accum <= parse_accum * 8'd10 + (rx_data - "0");
+                        error_code <= `ERR_NONE;
+                    end else begin
+                        error_code <= `ERR_DIM_RANGE;
+                        if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end // Echo '!'
                     end
-                    // 发送确认信息：回显接收到的数据
-                    // if (!tx_busy) begin
-                    //    tx_data <= "N"; // 回显接收到的字符
-                    //    tx_start <= 1'b1;
-                    // end
                 end
             end
             
@@ -185,7 +189,12 @@ always @(posedge clk or negedge rst_n) begin
                 if (input_m == 4'd0 || input_m > config_max_dim ||
                     input_n == 4'd0 || input_n > config_max_dim) begin
                     error_code <= `ERR_DIM_RANGE;
-                    sub_state <= ERROR;
+                    // Reset to PARSE_M to allow user to re-enter dimensions
+                    sub_state <= PARSE_M;
+                    parse_accum <= 8'd0;
+                    input_m <= 4'd0;
+                    input_n <= 4'd0;
+                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end // Echo '!'
                 end else begin
                     // Pre-compute total elements to avoid repeated multiply
                     total_elements <= {4'd0, input_m} * {4'd0, input_n};
@@ -219,17 +228,21 @@ always @(posedge clk or negedge rst_n) begin
             end
             
             PARSE_DATA: begin
-                if (rx_done) begin
+                if (timeout_reset) begin
+                    sub_state <= IDLE;
+                end else if (rx_done) begin
                     if (rx_data >= "0" && rx_data <= "9") begin
                         // Accumulate digit
                         // Check if adding this digit exceeds max value
                         // Note: parse_accum * 10 + digit
-                        if (({parse_accum[4:0], 3'd0} + {6'd0, parse_accum[1:0]} + (rx_data - "0")) > {4'd0, config_max_value}) begin
+                        if (({8'd0, parse_accum} * 16'd10 + {8'd0, rx_data} - 16'd48) > {12'd0, config_max_value}) begin
                              error_code <= `ERR_VALUE_RANGE;
-                             sub_state <= ERROR;
+                             if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end // Echo '!'
+                             // Stay in PARSE_DATA, do not update accum, wait for valid input
                         end else begin
-                             parse_accum <= {parse_accum[4:0], 3'd0} + {6'd0, parse_accum[1:0]} + (rx_data - "0");
+                             parse_accum <= parse_accum * 8'd10 + (rx_data - "0");
                              digit_received <= 1'b1;
+                             error_code <= `ERR_NONE;
                         end
                     end else if (rx_data == 8'h20) begin // Space
                         if (digit_received) begin
@@ -247,6 +260,7 @@ always @(posedge clk or negedge rst_n) begin
                             parse_accum <= 8'd0;
                             digit_received <= 1'b0;
                         end
+                        error_code <= `ERR_NONE;
                         // If space received without digits (e.g. multiple spaces), just ignore.
                     end else if (rx_data == 8'h0D || rx_data == 8'h0A) begin // Enter
                         if (digit_received) begin
@@ -276,10 +290,12 @@ always @(posedge clk or negedge rst_n) begin
                         end
                         parse_accum <= 8'd0;
                         digit_received <= 1'b0;
+                        error_code <= `ERR_NONE;
                     end else begin
                         // Invalid character received (not a digit, not space, not enter)
                         error_code <= `ERR_VALUE_RANGE; // Or define a new error code like ERR_INVALID_CHAR
-                        sub_state <= ERROR;
+                        if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end // Echo '!'
+                        // Stay in PARSE_DATA
                     end
                 end
             end
@@ -403,30 +419,6 @@ always @(posedge clk or negedge rst_n) begin
                 //    sub_state <= IDLE;
                 // end
                 sub_state <= IDLE;
-            end
-            
-            ERROR: begin
-                // Stay in error until mode exits or reset
-                commit_req <= 1'b0;
-                alloc_req <= 1'b0;
-                
-                // If user provides new input, try to recover
-                if (rx_done) begin
-                    error_code <= `ERR_NONE;
-                    if (total_elements == 0) begin
-                        // Error happened during dimension input -> Restart
-                        sub_state <= PARSE_M;
-                        parse_accum <= 8'd0;
-                        input_m <= 4'd0;
-                        input_n <= 4'd0;
-                    end else begin
-                        // Error happened during data input -> Retry current element
-                        sub_state <= PARSE_DATA;
-                        // If the input was a valid digit, we could process it here, 
-                        // but to keep it simple and avoid code duplication, 
-                        // we just return to PARSE_DATA. The user might need to type again.
-                    end
-                end
             end
             
             default: sub_state <= IDLE;

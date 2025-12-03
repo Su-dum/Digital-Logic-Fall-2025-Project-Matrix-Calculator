@@ -45,8 +45,6 @@ set_property IOSTANDARD LVCMOS33 [get_ports {seg_countdown[*]}]
 set_property PACKAGE_PIN G6 [get_ports {count_down_select}]
 set_property IOSTANDARD LVCMOS33 [get_ports {count_down_select}]
 
-create_clock -period 50.000 -name sys_clk [get_ports clk]
-
 set_false_path -from [get_ports uart_rx]
 set_false_path -to [get_ports uart_tx]
 

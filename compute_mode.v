@@ -61,7 +61,10 @@ module compute_mode #(
     output reg [ELEMENT_WIDTH-1:0] mem_wr_data,
     
     output reg [3:0] error_code,
-    output reg [3:0] sub_state
+    output reg [3:0] sub_state,
+    
+    // Error recovery signal
+    input wire timeout_reset
 );
 
 // State definitions
@@ -256,8 +259,11 @@ always @(posedge clk or negedge rst_n) begin
             end
             
             SELECT_MATRIX: begin
-                case (sel_step)
-                    // PHASE 1: STATISTICS
+                if (timeout_reset) begin
+                    sub_state <= IDLE;
+                end else begin
+                    case (sel_step)
+                        // PHASE 1: STATISTICS
                     5'd0: begin // Init
                         iter_m <= 1;
                         iter_n <= 1;
@@ -318,17 +324,39 @@ always @(posedge clk or negedge rst_n) begin
                     // PHASE 2: INPUT DIMENSIONS
                     5'd5: begin 
                         if (rx_done) begin
-                            target_m <= rx_data - "0";
-                            sel_step <= 5'd6;
+                            if (rx_data >= "0" && rx_data <= "9") begin
+                                if ((rx_data - "0") > config_max_dim || (rx_data - "0") == 0) begin
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                end else begin
+                                    target_m <= rx_data - "0";
+                                    sel_step <= 5'd6;
+                                    error_code <= `ERR_NONE;
+                                end
+                            end else begin
+                                error_code <= `ERR_DIM_RANGE;
+                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            end
                         end
                     end
                     
                     5'd6: begin 
                         if (rx_done) begin
-                            target_n <= rx_data - "0";
-                            sel_step <= 5'd7;
-                            scan_slot <= 0;
-                            match_idx <= 1;
+                            if (rx_data >= "0" && rx_data <= "9") begin
+                                if ((rx_data - "0") > config_max_dim || (rx_data - "0") == 0) begin
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                end else begin
+                                    target_n <= rx_data - "0";
+                                    sel_step <= 5'd7;
+                                    scan_slot <= 0;
+                                    match_idx <= 1;
+                                    error_code <= `ERR_NONE;
+                                end
+                            end else begin
+                                error_code <= `ERR_DIM_RANGE;
+                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            end
                         end
                     end
 
@@ -449,10 +477,16 @@ always @(posedge clk or negedge rst_n) begin
                     // PHASE 4: SELECT OPERANDS
                     5'd13: begin // Wait Selection 1
                         if (rx_done) begin
-                            user_sel_idx <= rx_data - "0";
-                            scan_slot <= 0;
-                            match_idx <= 1;
-                            sel_step <= 5'd14; 
+                            if (rx_data >= "0" && rx_data <= "9") begin
+                                user_sel_idx <= rx_data - "0";
+                                scan_slot <= 0;
+                                match_idx <= 1;
+                                sel_step <= 5'd14; 
+                                error_code <= `ERR_NONE;
+                            end else begin
+                                error_code <= `ERR_VALUE_RANGE;
+                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            end
                         end
                     end
                     
@@ -561,26 +595,34 @@ always @(posedge clk or negedge rst_n) begin
 
                     6'd49: begin // Wait Op2 M
                         if (rx_done) begin
-                            // For Mul, Op2 M must match Op1 N (target_n)
-                            // But user might input it anyway. We can check or overwrite.
-                            // Let's overwrite target_m/n for Op2 selection context
-                            // Store Op1 dims if needed? Op1 slot is stored.
-                            // target_m <= rx_data - "0"; // User input M
-                            // Actually for Mul: Op1 is (M x N), Op2 must be (N x P)
-                            // So Op2 M MUST be equal to Op1 N.
-                            // We can skip asking for M, or ask and verify.
-                            // Let's ask for P (Op2 N).
-                            // But to be consistent with UI, maybe ask both?
-                            // Let's assume user inputs M then N.
-                            if ((rx_data - "0") == target_n) begin
-                                // Valid M for Op2
-                                sel_step <= 6'd50;
+                            if (rx_data >= "0" && rx_data <= "9") begin
+                                // For Mul, Op2 M must match Op1 N (target_n)
+                                // But user might input it anyway. We can check or overwrite.
+                                // Let's overwrite target_m/n for Op2 selection context
+                                // Store Op1 dims if needed? Op1 slot is stored.
+                                // target_m <= rx_data - "0"; // User input M
+                                // Actually for Mul: Op1 is (M x N), Op2 must be (N x P)
+                                // So Op2 M MUST be equal to Op1 N.
+                                // We can skip asking for M, or ask and verify.
+                                // Let's ask for P (Op2 N).
+                                // But to be consistent with UI, maybe ask both?
+                                // Let's assume user inputs M then N.
+                                if ((rx_data - "0") == target_n) begin
+                                    // Valid M for Op2
+                                    sel_step <= 6'd50;
+                                    error_code <= `ERR_NONE;
+                                end else begin
+                                    // Invalid M for Mul, maybe error or retry?
+                                    // For now, just retry
+                                    // sel_step <= 6'd49;
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                end
+                                clear_rx_buffer <= 1;
                             end else begin
-                                // Invalid M for Mul, maybe error or retry?
-                                // For now, just retry
-                                sel_step <= 6'd49;
+                                error_code <= `ERR_DIM_RANGE;
+                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
                             end
-                            clear_rx_buffer <= 1;
                         end
                     end
                     
@@ -592,11 +634,22 @@ always @(posedge clk or negedge rst_n) begin
 
                     6'd51: begin
                         if (rx_done) begin
-                            target_m <= target_n; // Op2 M = Op1 N
-                            target_n <= rx_data - "0"; // Op2 N = P
-                            sel_step <= 6'd52;
-                            scan_slot <= 0;
-                            match_idx <= 1;
+                            if (rx_data >= "0" && rx_data <= "9") begin
+                                if ((rx_data - "0") > config_max_dim || (rx_data - "0") == 0) begin
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                end else begin
+                                    target_m <= target_n; // Op2 M = Op1 N
+                                    target_n <= rx_data - "0"; // Op2 N = P
+                                    sel_step <= 6'd52;
+                                    scan_slot <= 0;
+                                    match_idx <= 1;
+                                    error_code <= `ERR_NONE;
+                                end
+                            end else begin
+                                error_code <= `ERR_DIM_RANGE;
+                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            end
                         end
                     end
 
@@ -714,10 +767,16 @@ always @(posedge clk or negedge rst_n) begin
                     
                     5'd16: begin // Wait Selection 2
                         if (rx_done) begin
-                            user_sel_idx <= rx_data - "0";
-                            scan_slot <= 0;
-                            match_idx <= 1;
-                            sel_step <= 6'd17;
+                            if (rx_data >= "0" && rx_data <= "9") begin
+                                user_sel_idx <= rx_data - "0";
+                                scan_slot <= 0;
+                                match_idx <= 1;
+                                sel_step <= 6'd17;
+                                error_code <= `ERR_NONE;
+                            end else begin
+                                error_code <= `ERR_VALUE_RANGE;
+                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            end
                         end
                     end
                     
@@ -754,8 +813,14 @@ always @(posedge clk or negedge rst_n) begin
                     
                     5'd19: begin // Wait Scalar
                         if (rx_done) begin
-                            scalar_val <= rx_data - "0";
-                            sel_step <= 6'd25; // Print Op1 then Scalar
+                            if (rx_data >= "0" && rx_data <= "9") begin
+                                scalar_val <= rx_data - "0";
+                                sel_step <= 6'd25; // Print Op1 then Scalar
+                                error_code <= `ERR_NONE;
+                            end else begin
+                                error_code <= `ERR_VALUE_RANGE;
+                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            end
                         end
                     end
                     
@@ -963,6 +1028,7 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     
                 endcase
+                end
             end
 
             EXECUTE: begin

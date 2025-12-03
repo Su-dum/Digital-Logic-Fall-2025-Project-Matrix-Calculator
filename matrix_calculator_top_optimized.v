@@ -21,7 +21,7 @@ module matrix_calculator_top_optimized (
     output wire count_down_select // New port for countdown display selection
 );
 
-    assign count_down_select = 1'b1; // Always enable countdown display
+    assign count_down_select = 1'b1; // Enable countdown display (Active High)
     // ========================================
     // 1. �������� (Debouncing) - �����޸�
     // ========================================
@@ -33,12 +33,12 @@ module matrix_calculator_top_optimized (
     button_debounce db_confirm (
         .clk(clk), .rst_n(rst_n), 
         .btn_in(btn_confirm),  // ԭʼ�����źţ�������������ʱΪ0��
-        .btn_pulse(btn_confirm_pulse) // �����������??
+        .btn_pulse(btn_confirm_pulse) // �����������??
     );
     button_debounce db_back (
         .clk(clk), .rst_n(rst_n), 
         .btn_in(btn_back),     // ԭʼ�����ź�
-        .btn_pulse(btn_back_pulse) // �����������??
+        .btn_pulse(btn_back_pulse) // �����������??
     );
 
     // ========================================
@@ -237,30 +237,26 @@ assign query_slot_mux = display_mode_active ? query_slot_display : query_slot_co
     always @(*) begin
         main_state_next = main_state;
         
-        if (error_timeout) begin
-            main_state_next = `MAIN_MENU;
-        end else begin
-            case (main_state)
-                `MAIN_MENU: begin
-                    if (btn_confirm_pulse) begin
-                        case (dip_sw)
-                            3'd1: main_state_next = `MODE_INPUT;
-                            3'd2: main_state_next = `MODE_GENERATE;
-                            3'd3: main_state_next = `MODE_DISPLAY;
-                            3'd4: main_state_next = `MODE_COMPUTE;
-                            3'd5: main_state_next = `MODE_SETTING;
-                            default: main_state_next = `MAIN_MENU; 
-                        endcase
-                    end
+        case (main_state)
+            `MAIN_MENU: begin
+                if (btn_confirm_pulse) begin
+                    case (dip_sw)
+                        3'd1: main_state_next = `MODE_INPUT;
+                        3'd2: main_state_next = `MODE_GENERATE;
+                        3'd3: main_state_next = `MODE_DISPLAY;
+                        3'd4: main_state_next = `MODE_COMPUTE;
+                        3'd5: main_state_next = `MODE_SETTING;
+                        default: main_state_next = `MAIN_MENU; 
+                    endcase
                 end
-                
-                default: begin 
-                    if (btn_back_pulse) begin
-                        main_state_next = `MAIN_MENU;
-                    end
+            end
+            
+            default: begin 
+                if (btn_back_pulse) begin
+                    main_state_next = `MAIN_MENU;
                 end
-            endcase
-        end
+            end
+        endcase
     end
 
 // ========================================
@@ -291,7 +287,12 @@ end
 // ========================================
 // Error Handling with Timer
 // ========================================
-reg countdown_reg;
+reg [3:0] countdown_reg;
+assign countdown_val = countdown_reg;
+
+// Use CLK_FREQ to determine timer thresholds
+localparam TIMER_MAX = 30'd7 * `CLK_FREQ; // 7 seconds
+localparam TIMER_STEP = `CLK_FREQ; // 1 second
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -301,17 +302,17 @@ always @(posedge clk or negedge rst_n) begin
         countdown_reg <= 4'd7;
     end else begin
         if (error_code != `ERR_NONE) begin
-            if (error_timer < 30'd700_000_000) begin
+            if (error_timer < TIMER_MAX) begin
                 error_timer <= error_timer + 1'b1;
                 error_led <= 1'b1;
                 error_timeout <= 1'b0;
                 
-                if (error_timer < 30'd100_000_000) countdown_reg <= 4'd7;
-                else if (error_timer < 30'd200_000_000) countdown_reg <= 4'd6;
-                else if (error_timer < 30'd300_000_000) countdown_reg <= 4'd5;
-                else if (error_timer < 30'd400_000_000) countdown_reg <= 4'd4;
-                else if (error_timer < 30'd500_000_000) countdown_reg <= 4'd3;
-                else if (error_timer < 30'd600_000_000) countdown_reg <= 4'd2;
+                if (error_timer < TIMER_STEP) countdown_reg <= 4'd7;
+                else if (error_timer < TIMER_STEP * 2) countdown_reg <= 4'd6;
+                else if (error_timer < TIMER_STEP * 3) countdown_reg <= 4'd5;
+                else if (error_timer < TIMER_STEP * 4) countdown_reg <= 4'd4;
+                else if (error_timer < TIMER_STEP * 5) countdown_reg <= 4'd3;
+                else if (error_timer < TIMER_STEP * 6) countdown_reg <= 4'd2;
                 else countdown_reg <= 4'd1;
             end else begin
                 error_timer <= 30'd0;
@@ -414,6 +415,7 @@ input_mode input_mode_inst (
     .clk(clk),
     .rst_n(rst_n),
     .mode_active(input_mode_active),
+    .timeout_reset(error_timeout), // Connect timeout reset signal
     .config_max_dim(config_max_dim),
     .config_max_value(config_max_value),
     .rx_data(rx_data),
@@ -472,7 +474,8 @@ generate_mode generate_mode_inst (
     .mem_wr_addr(mem_wr_addr_generate),
     .mem_wr_data(mem_wr_data_generate),
     .error_code(error_code_generate),
-    .sub_state(sub_state_generate)
+    .sub_state(sub_state_generate),
+    .timeout_reset(error_timeout)
 );
 
 // ========================================
@@ -511,7 +514,7 @@ compute_mode compute_mode_inst (
         .mode_active(compute_mode_active),
         .config_max_dim(config_max_dim),
         
-        // ����������������źţ�???1?7??1?7����ԭʼ������
+        // ����������������źţ�???1?7??1?7����ԭʼ������
         .dip_sw(dip_sw),               
         .btn_confirm(main_state == `MODE_COMPUTE ? btn_confirm_pulse : 1'b0), 
         .selected_op_type(op_type_from_compute), 
@@ -552,7 +555,8 @@ compute_mode compute_mode_inst (
         .mem_wr_data(mem_wr_data_compute),
         
         .error_code(error_code_compute),
-        .sub_state(sub_state_compute)
+        .sub_state(sub_state_compute),
+        .timeout_reset(error_timeout)
     );
 
 // ========================================
