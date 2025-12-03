@@ -55,11 +55,11 @@ module display_ctrl (
     always @(*) begin
         if (main_state == 3'd4) begin // Compute Mode
             case (op_type)
-                3'd0: disp_data_op = CHAR_T; // Transpose
-                3'd1: disp_data_op = CHAR_A; // Add
-                3'd2: disp_data_op = 7'b0011111; // b (Scalar)
-                3'd3: disp_data_op = CHAR_C; // Mult
-                3'd4: disp_data_op = CHAR_J; // Conv (Bonus)
+                3'd1: disp_data_op = CHAR_T; // Transpose
+                3'd2: disp_data_op = CHAR_A; // Add
+                3'd3: disp_data_op = 7'b0011111; // b (Scalar)
+                3'd4: disp_data_op = CHAR_C; // Mult
+                3'd5: disp_data_op = CHAR_J; // Conv 
                 default: disp_data_op = S_OFF;
             endcase
         end else if (error_code != 0) begin
