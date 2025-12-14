@@ -636,6 +636,7 @@ always @(posedge clk or negedge rst_n) begin
                                 end else if (selected_op_type == OP_MUL) begin
                                     // For Matrix Mul, we need to select 2nd matrix with potentially different dims
                                     // Reset stats and go to stats phase for 2nd operand
+                                    
                                     sel_step <= 6'd44; 
                                 end else if (selected_op_type == OP_ADD) begin
                                     // For Add, 2nd operand has same dims as 1st
@@ -1044,6 +1045,10 @@ always @(posedge clk or negedge rst_n) begin
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
                                 scalar_val <= rx_data - "0";
+                                sel_step <= 6'd25; // Print Op1 then Scalar
+                                error_code <= `ERR_NONE;
+                            end else if (rx_data == "R") begin
+                                scalar_val <= random_number % 10; // Random scalar between 0-9
                                 sel_step <= 6'd25; // Print Op1 then Scalar
                                 error_code <= `ERR_NONE;
                             end else begin
